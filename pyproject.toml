@@ -1,0 +1,16 @@
+[project]
+name = "pwnchain"
+version = "0.1.0"
+description = "A TUI-based binary analysis tool for CTFs and wargames."
+authors = [{ name = "Gemini CLI", email = "gemini@google.com" }]
+dependencies = [
+    "textual",
+    "pwntools",
+]
+
+[project.scripts]
+PwnChain = "pwnchain.main:main"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"

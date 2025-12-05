@@ -2,38 +2,34 @@
 
 #app-grid {
     layout: grid;
-    grid-size: 2 2;
+    grid-size: 2 3;
     grid-gutter: 1;
-    grid-rows: 1fr 3fr;
-    padding: 0 1;
-}
-
-#left-column {
-    display: block;
-}
-
-#right-column {
-    display: block;
+    grid-rows: 2fr 1fr 1fr;
 }
 
 #disassembly-view {
     column-span: 2;
-    height: 100%;
-    border: thick $primary;
-}
-
-#stack-view {
-    column-span: 2;
-    height: 100%;
-    border: thick $primary;
+    border: heavy $primary;
+    padding: 1;
 }
 
 #register-view {
-    height: 50%;
-    border: thick $primary;
+    border: heavy $primary;
+    padding: 1;
+}
+
+#stack-view {
+    border: heavy $primary;
+    padding: 1;
 }
 
 #log-view {
-    height: 50%;
-    border: thick $primary;
+    column-span: 2;
+    border: heavy $primary;
+    padding: 1;
+}
+
+#command-input {
+    dock: bottom;
+    margin: 0 0 1;
 }
