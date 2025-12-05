@@ -188,6 +188,72 @@ class PwnChainApp(App):
                 log_view.write(f"[ERROR] Failed to attach GDB: {e}")
                 self._current_gdb = None # Ensure GDB is cleared on failure
 
+        elif cmd == "gdb_cmd":
+            if not self._current_gdb:
+                log_view.write("[ERROR] GDB not attached. Use 'gdb' command first.")
+                return
+            if not args:
+                log_view.write("[ERROR] Usage: gdb_cmd <command string>")
+                return
+            gdb_command_str = " ".join(args)
+            try:
+                output = self._current_gdb.execute(gdb_command_str, to_string=True)
+                log_view.write(f"[*] GDB output for '{gdb_command_str}':")
+                log_view.write(output)
+                self._update_debugger_views() # Update views after GDB command
+            except Exception as e:
+                log_view.write(f"[ERROR] GDB command failed: {e}")
+
+        elif cmd in ["c", "cont", "continue"]:
+            if not self._current_gdb:
+                log_view.write("[ERROR] GDB not attached. Use 'gdb' command first.")
+                return
+            try:
+                log_view.write("[*] Continuing process...")
+                self._current_gdb.cont()
+                log_view.write("[SUCCESS] Process continued.")
+                self._update_debugger_views() # Update views after continue
+            except Exception as e:
+                log_view.write(f"[ERROR] Failed to continue: {e}")
+
+        elif cmd in ["n", "next", "nexti"]:
+            if not self._current_gdb:
+                log_view.write("[ERROR] GDB not attached. Use 'gdb' command first.")
+                return
+            try:
+                log_view.write("[*] Stepping next instruction...")
+                self._current_gdb.next(count=1)
+                log_view.write("[SUCCESS] Stepped next instruction.")
+                self._update_debugger_views()
+            except Exception as e:
+                log_view.write(f"[ERROR] Failed to step next: {e}")
+
+        elif cmd in ["s", "si", "step", "stepi"]:
+            if not self._current_gdb:
+                log_view.write("[ERROR] GDB not attached. Use 'gdb' command first.")
+                return
+            try:
+                log_view.write("[*] Stepping into instruction...")
+                self._current_gdb.step(count=1)
+                log_view.write("[SUCCESS] Stepped into instruction.")
+                self._update_debugger_views()
+            except Exception as e:
+                log_view.write(f"[ERROR] Failed to step into: {e}")
+
+        elif cmd in ["b", "break"]:
+            if not self._current_gdb:
+                log_view.write("[ERROR] GDB not attached. Use 'gdb' command first.")
+                return
+            if not args:
+                log_view.write("[ERROR] Usage: break <address/function_name>")
+                return
+            breakpoint_target = " ".join(args)
+            try:
+                self._current_gdb.break(breakpoint_target)
+                log_view.write(f"[SUCCESS] Breakpoint set at: {breakpoint_target}")
+                self._update_debugger_views()
+            except Exception as e:
+                log_view.write(f"[ERROR] Failed to set breakpoint: {e}")
 
         elif cmd == "run":
             if not self._current_elf:
