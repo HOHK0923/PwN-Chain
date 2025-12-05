@@ -7,6 +7,32 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.columns import Columns
 from rich.table import Table
+from rich.theme import Theme
+from rich.text import Text
+
+# --- ASCII Art Banner ---
+BANNER = """
+██████╗ ██╗    ██╗███╗   ██╗██╗  ██╗ ██████╗██╗  ██╗ █████╗ ██╗███╗   ██╗
+██╔══██╗██║    ██║████╗  ██║██║  ██║██╔════╝██║  ██║██╔══██╗██║████╗  ██║
+██████╔╝██║ █╗ ██║██╔██╗ ██║███████║██║     ███████║███████║██║██╔██╗ ██║
+██╔═══╝ ██║███╗██║██║╚██╗██║██╔══██║██║     ██╔══██║██╔══██║██║██║╚██╗██║
+██║     ╚███╔███╔╝██║ ╚████║██║  ██║╚██████╗██║  ██║██║  ██║██║██║ ╚████║
+╚═╝      ╚══╝╚══╝ ╚═╝  ╚═══╝╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚═╝  ╚═══╝
+A Modern CLI for Binary Analysis & Exploitation, powered by Gemini.
+"""
+
+# --- Custom Theme ---
+custom_theme = Theme({
+    "info": "dim cyan",
+    "warning": "yellow",
+    "error": "bold red",
+    "success": "bold green",
+    "prompt": "bold cyan",
+    "address": "bold magenta",
+    "path": "bold blue",
+    "panel_border": "dim blue"
+})
+
 
 class PwnChainCLI:
     """A pwndbg-style CLI for binary analysis."""
@@ -16,32 +42,32 @@ class PwnChainCLI:
         self._current_elf = None
         self._current_process = None
         self._current_gdb = None
-        self.console = Console()
+        self.console = Console(theme=custom_theme)
         context.log_level = 'error'
 
     def _display_context(self):
         if not self._current_gdb or not self._current_process or not self._current_process.is_alive():
             return
-
+        
         try:
-            regs_table = Table(title="Registers", show_header=False, box=None)
+            regs_table = Table(title="Registers", show_header=False, box=None, padding=(0, 1))
             regs_table.add_column("Register", style="cyan")
-            regs_table.add_column("Value", style="magenta")
+            regs_table.add_column("Value", style="address")
             regs = self._current_gdb.execute("info registers", to_string=True).splitlines()
             for reg_line in regs:
                 parts = reg_line.split()
                 if len(parts) >= 2:
                     regs_table.add_row(parts[0], parts[1])
             
-            disassembly = self._current_gdb.execute("x/10i $pc", to_string=True)
-            disasm_panel = Panel(disassembly, title="Disassembly", border_style="green")
+            disassembly_text = Text.from_ansi(self._current_gdb.execute("x/10i $pc", to_string=True))
+            disasm_panel = Panel(disassembly_text, title="Disassembly", border_style="green", expand=True)
 
-            stack = self._current_gdb.execute("x/16xg $rsp", to_string=True)
-            stack_panel = Panel(stack, title="Stack", border_style="yellow")
+            stack_text = Text.from_ansi(self._current_gdb.execute("x/16xg $rsp", to_string=True))
+            stack_panel = Panel(stack_text, title="Stack", border_style="yellow", expand=True)
 
-            self.console.print(Panel(Columns([disasm_panel, stack_panel, regs_table]), border_style="blue"))
+            self.console.print(Panel(Columns([disasm_panel, stack_panel, regs_table]), border_style="panel_border", title="GDB Context")
         except Exception as e:
-            self.console.print(f"[bold red]Error updating context: {e}[/bold red]")
+            self.console.print(f"[error]Error updating context: {e}[/error]")
 
     def handle_command(self, command_str):
         parts = command_str.split()
@@ -53,156 +79,156 @@ class PwnChainCLI:
         handler(args)
 
     def _cmd_unknown(self, args):
-        self.console.print(f"[bold red]Unknown command.[/bold red]")
+        self.console.print(f"[error]Unknown command.[/error]")
 
     def _cmd_help(self, args):
         help_text = """
-Available Commands:
-  - help: Show this help message.
-  - exit: Exit the application.
-  - connect <user@host[:port]>: Connect to a remote host via SSH.
-  - disconnect: Disconnect from the remote host.
-  - upload <local> <remote>: Upload a file or folder to the remote host.
-  - load <path>: Load a binary for analysis (local or remote path).
-  - run [args...]: Run the loaded binary.
-  - gdb: Attach GDB to the running process.
-  - gdb_cmd <gdb_command>: Execute a raw GDB command.
-  - c, cont, continue: Continue execution in GDB.
-  - n, next: Step over next instruction in GDB.
-  - s, si, step, stepi: Step into next instruction in GDB.
-  - b, break <target>: Set a breakpoint in GDB.
-  - exploit [filename]: Generate a pwntools exploit template.
+[bold]Available Commands:[/bold]
+  - [cyan]help[/cyan]: Show this help message.
+  - [cyan]exit[/cyan]: Exit the application.
+  - [cyan]connect[/cyan] [dim]<user@host[:port]>[/dim]: Connect to a remote host via SSH.
+  - [cyan]disconnect[/cyan]: Disconnect from the remote host.
+  - [cyan]upload[/cyan] [dim]<local> <remote>[/dim]: Upload a file or folder to the remote host.
+  - [cyan]load[/cyan] [dim]<path>[/dim]: Load a binary for analysis (local or remote path).
+  - [cyan]run[/cyan] [dim][args...][/dim]: Run the loaded binary.
+  - [cyan]gdb[/cyan]: Attach GDB to the running process.
+  - [cyan]gdb_cmd[/cyan] [dim]<gdb_command>[/dim]: Execute a raw GDB command.
+  - [cyan]c, cont, continue[/cyan]: Continue execution in GDB.
+  - [cyan]n, next[/cyan]: Step over next instruction in GDB.
+  - [cyan]s, si, step, stepi[/cyan]: Step into next instruction in GDB.
+  - [cyan]b, break[/cyan] [dim]<target>[/dim]: Set a breakpoint in GDB.
+  - [cyan]exploit[/cyan] [dim][filename][/dim]: Generate a pwntools exploit template.
 """
-        self.console.print(Panel(help_text, title="Help"))
+        self.console.print(Panel(help_text, title="Help", border_style="panel_border"))
 
     def _cmd_load(self, args):
         if not args:
-            self.console.print("[bold red]Usage: load <file_path>[/bold red]")
+            self.console.print("[error]Usage: load <file_path>[/error]")
             return
         
         remote_file_path = args[0]
-        local_file_path = None
         
         try:
             if self._current_ssh:
-                self.console.print(f"[*] Downloading {remote_file_path} from remote...")
-                with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
-                    self._current_ssh.download(remote_file_path, tmp_file.name)
-                    local_file_path = tmp_file.name
+                with self.console.status(f"Downloading {remote_file_path}...", spinner="dots"):
+                    with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
+                        self._current_ssh.download(remote_file_path, tmp_file.name)
+                        local_file_path = tmp_file.name
                 atexit.register(os.remove, local_file_path)
-                self.console.print(f"[green][SUCCESS][/green] Downloaded to temporary file: {local_file_path}")
+                self.console.print(f"[success]Downloaded to temporary file: [path]{local_file_path}[/path][/success]")
             else:
                 local_file_path = remote_file_path
                 if not os.path.exists(local_file_path):
-                    self.console.print(f"[bold red]Local file not found: {local_file_path}[/bold red]")
+                    self.console.print(f"[error]Local file not found: [path]{local_file_path}[/path][/error]")
                     return
 
             self._current_elf = elf = ELF(local_file_path)
-            self.console.print(f"[*] Loaded binary: [cyan]{remote_file_path}[/cyan]")
+            self.console.print(f"[*] Loaded binary: [path]{remote_file_path}[/path]")
             self._run_ai_analysis(elf)
 
         except Exception as e:
-            self.console.print(f"[bold red]Failed to analyze binary: {e}[/bold red]")
+            self.console.print(f"[error]Failed to analyze binary: {e}[/error]")
 
     def _run_ai_analysis(self, elf):
         checksec_result = elf.checksec(banner=False)
-        self.console.print(Panel(str(checksec_result), title="checksec"))
+        self.console.print(Panel(str(checksec_result), title="checksec", border_style="panel_border"))
         
         suggestions = []
         if not checksec_result.get('Canary'):
-            suggestions.append("- [bold yellow]Canary disabled:[/bold yellow] Potential for Stack Buffer Overflow.")
+            suggestions.append("- [warning]Canary disabled:[/warning] Potential for Stack Buffer Overflow.")
         if not checksec_result.get('NX'):
-            suggestions.append("- [bold yellow]NX disabled:[/bold yellow] Shellcode injection on the stack/heap is possible.")
+            suggestions.append("- [warning]NX disabled:[/warning] Shellcode injection on the stack/heap is possible.")
         if not checksec_result.get('PIE'):
-            suggestions.append("- [bold yellow]PIE disabled:[/bold yellow] Binary addresses are static, simplifying ROP/ret2libc.")
+            suggestions.append("- [info]PIE disabled:[/info] Binary addresses are static, simplifying ROP/ret2libc.")
         
         dangerous_functions = ['gets', 'strcpy', 'sprintf', 'system']
         found_dangerous = [func for func in dangerous_functions if func in elf.symbols or func in elf.plt]
         if found_dangerous:
-            suggestions.append(f"- [bold yellow]Dangerous functions found:[/bold yellow] {', '.join(found_dangerous)}. Check their usage.")
+            suggestions.append(f"- [warning]Dangerous functions found:[/warning] {', '.join(found_dangerous)}. Check their usage.")
 
         if suggestions:
-            self.console.print(Panel("\n".join(suggestions), title="AI Analysis Guide"))
+            self.console.print(Panel("\n".join(suggestions), title="AI Analysis Guide", border_style="panel_border"))
         else:
-            self.console.print(Panel("No obvious low-hanging fruit vulnerabilities detected.", title="AI Analysis Guide"))
+            self.console.print(Panel("No obvious low-hanging fruit vulnerabilities detected.", title="AI Analysis Guide", border_style="panel_border"))
 
     def _cmd_connect(self, args):
         if not args:
-            self.console.print("[bold red]Usage: connect user@host[:port][/bold red]")
+            self.console.print("[error]Usage: connect user@host[:port][/error]")
             return
         
         try:
             user, host, port = self._parse_ssh_string(args[0])
-            self.console.print(f"[*] Connecting to {user}@{host}:{port}...")
-            self._current_ssh = ssh(host=host, user=user, port=port)
-            self.console.print(f"[bold green]Connected![/bold green]")
+            with self.console.status(f"Connecting to {user}@{host}:{port}...", spinner="earth"):
+                self._current_ssh = ssh(host=host, user=user, port=port)
+            self.console.print(f"[success]Connected to [bold]{user}@{host}:{port}[/bold]![/success]")
         except Exception as e:
-            self.console.print(f"[bold red]Connection failed: {e}[/bold red]")
+            self.console.print(f"[error]Connection failed: {e}[/error]")
 
     def _cmd_disconnect(self, args):
         if self._current_ssh:
             self._current_ssh.close()
             self._current_ssh = None
-            self.console.print("[green]Disconnected.[/green]")
+            self.console.print("[success]Disconnected.[/success]")
         else:
-            self.console.print("Not connected.")
+            self.console.print("[info]Not connected.[/info]")
 
     def _cmd_upload(self, args):
         if not self._current_ssh:
-            self.console.print("[bold red]Not connected. Use 'connect' first.[/bold red]")
+            self.console.print("[error]Not connected. Use 'connect' first.[/error]")
             return
         if len(args) != 2:
-            self.console.print("[bold red]Usage: upload <local_path> <remote_path>[/bold red]")
+            self.console.print("[error]Usage: upload <local_path> <remote_path>[/error]")
             return
         
         local_path, remote_path = args
         if not os.path.exists(local_path):
-            self.console.print(f"[bold red]Local path not found: {local_path}[/bold red]")
+            self.console.print(f"[error]Local path not found: [path]{local_path}[/path][/error]")
             return
         
         try:
-            self.console.print(f"[*] Uploading '{local_path}' to remote '{remote_path}'...")
-            self._current_ssh.upload(local_path, remote_path)
-            self.console.print(f"[bold green]Upload successful.[/bold green]")
+            with self.console.status(f"Uploading '{local_path}'...", spinner="arc"):
+                self._current_ssh.upload(local_path, remote_path)
+            self.console.print(f"[success]Upload successful.[/success]")
         except Exception as e:
-            self.console.print(f"[bold red]Upload failed: {e}[/bold red]")
+            self.console.print(f"[error]Upload failed: {e}[/error]")
 
     def _cmd_run(self, args):
         if not self._current_elf:
-            self.console.print("[bold red]No binary loaded.[/bold red]")
+            self.console.print("[error]No binary loaded.[/error]")
             return
         
         try:
-            self.console.print(f"[*] Starting process: {self._current_elf.path} {' '.join(args)}")
+            self.console.print(f"[*] Starting process: [path]{self._current_elf.path}[/path] {' '.join(args)}")
             if self._current_ssh:
                 self._current_process = self._current_ssh.process([self._current_elf.path] + args)
             else:
                 self._current_process = process([self._current_elf.path] + args)
-            self.console.print(f"[green]Process started with PID: {self._current_process.pid}[/green]")
+            self.console.print(f"[success]Process started with PID: {self._current_process.pid}[/success]")
         except Exception as e:
-            self.console.print(f"[bold red]Failed to run process: {e}[/bold red]")
+            self.console.print(f"[error]Failed to run process: {e}[/error]")
 
     def _cmd_gdb(self, args):
         if not self._current_process or not self._current_process.is_alive():
-            self.console.print("[bold red]No running process to attach to.[/bold red]")
+            self.console.print("[error]No running process to attach to.[/error]")
             return
         try:
             self.console.print(f"[*] Attaching GDB to PID {self._current_process.pid}...")
             self._current_gdb = gdb.attach(self._current_process)
-            self.console.print("[bold green]GDB attached.[/bold green]")
+            self.console.print("[success]GDB attached.[/success]")
             self._display_context()
         except Exception as e:
-            self.console.print(f"[bold red]Failed to attach GDB: {e}[/bold red]")
+            self.console.print(f"[error]Failed to attach GDB: {e}[/error]")
 
     def _execute_gdb_cmd(self, cmd_func):
         if not self._current_gdb:
-            self.console.print("[bold red]GDB not attached.[/bold red]")
+            self.console.print("[error]GDB not attached.[/error]")
             return
         try:
-            cmd_func()
+            with self.console.status("Executing GDB command...", spinner="line"):
+                cmd_func()
             self._display_context()
         except Exception as e:
-            self.console.print(f"[bold red]GDB command failed: {e}[/bold red]")
+            self.console.print(f"[error]GDB command failed: {e}[/error]")
 
     def _cmd_c(self, args): self._execute_gdb_cmd(lambda: self._current_gdb.cont())
     def _cmd_cont(self, args): self._cmd_c(args)
@@ -218,26 +244,26 @@ Available Commands:
 
     def _cmd_b(self, args):
         if not args:
-            self.console.print("[bold red]Usage: break <address/function_name>[/bold red]")
+            self.console.print("[error]Usage: break <address/function_name>[/error]")
             return
         self._execute_gdb_cmd(lambda: self._current_gdb.break_(args[0]))
     def _cmd_break(self, args): self._cmd_b(args)
 
     def _cmd_gdb_cmd(self, args):
         if not self._current_gdb:
-            self.console.print("[bold red]GDB not attached.[/bold red]")
+            self.console.print("[error]GDB not attached.[/error]")
             return
         try:
             result = self._current_gdb.execute(" ".join(args), to_string=True)
             self.console.print(result)
         except Exception as e:
-            self.console.print(f"[bold red]GDB command failed: {e}[/bold red]")
+            self.console.print(f"[error]GDB command failed: {e}[/error]")
 
     def _cmd_exploit(self, args):
         if not self._current_elf:
-            self.console.print("[bold red]No binary loaded. Use 'load /path/to/binary' first to get context.[/bold red]")
+            self.console.print("[error]No binary loaded.[/error]")
             return
-
+        
         exploit_file_name = args[0] if args else "exploit.py"
         connect_host = self._current_ssh.host if self._current_ssh else "127.0.0.1"
         connect_port = self._current_ssh.port if self._current_ssh else 1337
@@ -247,14 +273,6 @@ Available Commands:
 from pwn import *
 
 # --- Gemini-generated exploit for: {self._current_elf.path} ---
-
-# For remote debugging, you can use a command like:
-# gdbserver :1234 {self._current_elf.path}
-# Then, in a separate terminal:
-# socat TCP-LISTEN:23946,reuseaddr,fork TCP:localhost:1234 &
-# ./venv/bin/PwnChain, then 'gdb localhost:23946'
-
-# --- Setup ---
 exe = context.binary = ELF('{self._current_elf.path}')
 context.arch = '{self._current_elf.arch}'
 # context.log_level = 'debug'
@@ -263,81 +281,53 @@ context.arch = '{self._current_elf.arch}'
 HOST = '{connect_host}'
 PORT = {connect_port}
 
-def start_local(argv=[], *a, **kw):
-    '''Execute the target binary locally'''
+def start(argv=[], *a, **kw):
+    '''Start the exploit against the target.'''
+    if args.REMOTE:
+        return connect(HOST, PORT)
     if args.GDB:
         return gdb.debug([exe.path] + argv, gdbscript=gdbscript, *a, **kw)
     else:
         return process([exe.path] + argv, *a, **kw)
 
-def start_remote(argv=[], *a, **kw):
-    '''Connect to the target binary remotely'''
-    io = connect(HOST, PORT)
-    return io
-
-def start(argv=[], *a, **kw):
-    '''Start the target process (local or remote)'''
-    if args.REMOTE:
-        return start_remote(argv, *a, **kw)
-    else:
-        return start_local(argv, *a, **kw)
-
-# --- GDB Script (optional) ---
+# --- GDB Script ---
 gdbscript = '''
 b main
 continue
 '''.format(**locals())
 
 # --- AI Suggestions ---
-# {self._get_ai_suggestions_for_exploit()}
+{self._get_ai_suggestions_for_exploit()}
 
 # --- Exploit Logic (EDIT ME!) ---
 io = start()
 
-# Example: Buffer Overflow (if Canary is disabled)
-# from pwnlib.util.cyclic import cyclic, cyclic_find
-# offset = cyclic_find(b'...') # Find offset by running in GDB: `cyclic 200`, `run`, `p $rsp`
-# payload = flat(
-#     b'A' * offset,
-#     p64(0xdeadbeef) # Return address (e.g., exe.sym.win_function)
-# )
-
-# Send the payload
-# io.sendline(payload)
-
-io.interactive()
-"""
-        
+io.interactive()"""
         try:
             with open(exploit_file_name, "w") as f:
                 f.write(template)
-
-            self.console.print(f"[bold green][SUCCESS][/bold green] Generated exploit template: [cyan]{exploit_file_name}[/cyan]")
-            self.console.print("[*] Remember to fill in your exploit logic.")
-            self.console.print(f"[*] Run with: `python3 {exploit_file_name} REMOTE` or `python3 {exploit_file_name} GDB`")
+            self.console.print(f"[success]Generated exploit template: [path]{exploit_file_name}[/path][/success]")
         except Exception as e:
-            self.console.print(f"[bold red]Failed to generate exploit file: {e}[/bold red]")
+            self.console.print(f"[error]Failed to generate exploit file: {e}[/error]")
 
     def _get_ai_suggestions_for_exploit(self):
-        if not self._current_elf:
-            return ""
+        if not self._current_elf: return ""
         
         checksec_result = self._current_elf.checksec(banner=False)
         suggestions = []
         if not checksec_result.get('Canary'):
-            suggestions.append("# - Canary disabled: Likely vulnerable to Stack Buffer Overflow.")
+            suggestions.append("# - Canary disabled -> Likely Stack Buffer Overflow.")
         if not checksec_result.get('NX'):
-            suggestions.append("# - NX disabled: Shellcode injection is a possible vector.")
+            suggestions.append("# - NX disabled -> Shellcode injection is possible.")
         if not checksec_result.get('PIE'):
-            suggestions.append("# - PIE disabled: Static addresses make ROP/ret2libc easier.")
+            suggestions.append("# - PIE disabled -> Static addresses make ROP/ret2libc easier.")
         
         dangerous_functions = ['gets', 'strcpy', 'sprintf', 'system']
-        found_dangerous = [func for func in dangerous_functions if func in self._current_elf.symbols or func in self._current_elf.plt]
-        if found_dangerous:
-            suggestions.append(f"# - Dangerous functions found: {', '.join(found_dangerous)}.")
+        found = [func for func in dangerous_functions if func in self._current_elf.symbols or func in self._current_elf.plt]
+        if found:
+            suggestions.append(f"# - Dangerous functions found: {', '.join(found)}.")
         
         return "\n".join(suggestions)
-
 
     def _parse_ssh_string(self, connect_str):
         user_host, *port_part = connect_str.split(':')
@@ -346,8 +336,7 @@ io.interactive()
         return user, host, port
 
     def run_cli(self):
-        self.console.print("[bold green]Welcome to PwnChain CLI! (pwndbg-style)[/bold green]")
-        self.console.print("Type 'help' for a list of commands.")
+        self.console.print(Panel(BANNER, border_style="green", expand=False))
         while True:
             try:
                 command = input("pwnchain> ").strip()
