@@ -55,6 +55,51 @@ class PwnChainApp(App):
                 log_view.write(f"[ERROR] File not found: {file_path}")
                 return
 
+            try:
+                context.log_level = 'error' # Suppress pwntools noisy output
+                self._current_elf = elf = ELF(file_path) # Store ELF for later
+                checksec_result = elf.checksec(banner=False)
+                
+                log_view.write(f"[*] Loaded binary: {file_path}")
+                log_view.write("[*] checksec results:")
+                for key, value in checksec_result.items():
+                    log_view.write(f"  {key}: {value}")
+
+                # AI-driven analysis guide
+                log_view.write("\n[*] AI Analysis Guide:")
+                suggestions = []
+
+                # Analyze checksec results
+                if not checksec_result.get('Canary'):
+                    suggestions.append("- [Exploit Suggestion] Canary not found: Potential for Stack Buffer Overflow without needing to leak canary.")
+                if not checksec_result.get('NX'):
+                    suggestions.append("- [Exploit Suggestion] NX (No-Execute) disabled: Potential for Shellcode Injection on the stack or heap.")
+                if not checksec_result.get('PIE'):
+                    suggestions.append("- [Exploit Suggestion] PIE (Position Independent Executable) disabled: Addresses (like main, functions, global variables) are static, simplifying ROP/return-to-libc attacks.")
+                
+                relro_status = checksec_result.get('RELRO')
+                if relro_status in ('Partial', 'No'):
+                    suggestions.append(f"- [Exploit Suggestion] RELRO is '{relro_status}': Potential for Global Offset Table (GOT) overwrite attacks.")
+
+                # Scan for dangerous functions
+                dangerous_functions = ['gets', 'strcpy', 'sprintf', 'system', 'execve', 'read', 'write']
+                found_dangerous = []
+                for func in dangerous_functions:
+                    if func in elf.symbols or func in elf.plt:
+                        found_dangerous.append(func)
+                
+                if found_dangerous:
+                    suggestions.append(f"- [Binary Insight] Potentially dangerous functions identified: {', '.join(found_dangerous)}. Investigate their usage for vulnerabilities.")
+                    if 'gets' in found_dangerous:
+                        suggestions.append("- [Exploit Suggestion] 'gets' is highly prone to buffer overflows. Look for input buffers where 'gets' is used.")
+
+                if not suggestions:
+                    log_view.write("  No obvious vulnerabilities detected by initial static analysis. Focus on logic flaws or less common vulnerabilities.")
+                else:
+                    for s in suggestions:
+                        log_view.write(s)
+                log_view.write("") # Add a blank line for readability
+
                 # Display disassembly
                 disassembly_view = self.query_one("#disassembly-view")
                 disassembly_view.clear()
