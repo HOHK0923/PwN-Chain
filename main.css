@@ -1,0 +1,39 @@
+/* PwN-Chain/main.css */
+
+#app-grid {
+    layout: grid;
+    grid-size: 2 2;
+    grid-gutter: 1;
+    grid-rows: 1fr 3fr;
+    padding: 0 1;
+}
+
+#left-column {
+    display: block;
+}
+
+#right-column {
+    display: block;
+}
+
+#disassembly-view {
+    column-span: 2;
+    height: 100%;
+    border: thick $primary;
+}
+
+#stack-view {
+    column-span: 2;
+    height: 100%;
+    border: thick $primary;
+}
+
+#register-view {
+    height: 50%;
+    border: thick $primary;
+}
+
+#log-view {
+    height: 50%;
+    border: thick $primary;
+}
