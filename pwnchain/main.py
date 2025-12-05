@@ -1,4 +1,6 @@
 import os
+import tempfile
+import atexit
 from pwn import *
 
 from textual.app import App, ComposeResult
@@ -13,6 +15,9 @@ class PwnChainApp(App):
         ("d", "toggle_dark", "Toggle dark mode"),
         ("q", "quit", "Quit"),
     ]
+
+    _current_ssh = None # Stores the current SSH connection object
+    _current_elf = None # Stores the current ELF object
 
     def compose(self) -> ComposeResult:
         """Create child widgets for the app."""
@@ -30,7 +35,7 @@ class PwnChainApp(App):
         self.query_one("#disassembly-view").write("Disassembly")
         self.query_one("#register-view").write("Registers")
         self.query_one("#stack-view").write("Stack")
-        self.query_one("#log-view").write("Logs: Enter 'load /path/to/binary' to start.")
+        self.query_one("#log-view").write("Logs: Enter 'load /path/to/binary' or 'connect user@host:port' to start.")
         self.query_one("#command-input").focus()
 
     async def on_input_submitted(self, message: Input.Submitted) -> None:
@@ -45,22 +50,57 @@ class PwnChainApp(App):
         parts = command.split()
         cmd, *args = parts
 
-        if cmd == "load":
+        if cmd == "connect":
+            if not args:
+                log_view.write("[ERROR] Usage: connect user@host[:port]")
+                return
+            
+            connect_str = args[0]
+            try:
+                user_host_port = connect_str.split('@')
+                if len(user_host_port) != 2:
+                    raise ValueError("Invalid format. Use user@host[:port]")
+                
+                user = user_host_port[0]
+                host_port = user_host_port[1].split(':')
+                host = host_port[0]
+                port = int(host_port[1]) if len(host_port) > 1 else 22
+
+                log_view.write(f"[*] Attempting to connect to {user}@{host}:{port}...")
+                self._current_ssh = ssh(host=host, user=user, port=port) # pwntools ssh function
+                log_view.write(f"[SUCCESS] Connected to {user}@{host}:{port}. You can now 'load /remote/path/to/binary'.")
+            except Exception as e:
+                log_view.write(f"[ERROR] Failed to connect: {e}")
+                self._current_ssh = None # Ensure connection is cleared on failure
+
+        elif cmd == "load":
             if not args:
                 log_view.write("[ERROR] No file path specified.")
                 return
             
-            file_path = args[0]
-            if not os.path.exists(file_path):
-                log_view.write(f"[ERROR] File not found: {file_path}")
-                return
-
+            remote_file_path = args[0]
+            local_file_path = None
+            
             try:
+                if self._current_ssh:
+                    # Download remote file
+                    log_view.write(f"[*] Downloading {remote_file_path} from remote...")
+                    with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
+                        self._current_ssh.download(remote_file_path, tmp_file.name)
+                        local_file_path = tmp_file.name
+                    atexit.register(os.remove, local_file_path) # Ensure cleanup on exit
+                    log_view.write(f"[SUCCESS] Downloaded to temporary file: {local_file_path}")
+                else:
+                    local_file_path = remote_file_path
+                    if not os.path.exists(local_file_path):
+                        log_view.write(f"[ERROR] Local file not found: {local_file_path}")
+                        return
+
                 context.log_level = 'error' # Suppress pwntools noisy output
-                self._current_elf = elf = ELF(file_path) # Store ELF for later
+                self._current_elf = elf = ELF(local_file_path) # Store ELF for later
                 checksec_result = elf.checksec(banner=False)
                 
-                log_view.write(f"[*] Loaded binary: {file_path}")
+                log_view.write(f"[*] Loaded binary: {remote_file_path} (local temp: {local_file_path if self._current_ssh else 'N/A'})")
                 log_view.write("[*] checksec results:")
                 for key, value in checksec_result.items():
                     log_view.write(f"  {key}: {value}")
@@ -124,6 +164,21 @@ class PwnChainApp(App):
                 
             except Exception as e:
                 log_view.write(f"[ERROR] Failed to analyze binary: {e}")
+                if self._current_ssh and local_file_path and os.path.exists(local_file_path):
+                    os.remove(local_file_path) # Clean up temp file on error
+
+        elif cmd == "disconnect":
+            if self._current_ssh:
+                try:
+                    self._current_ssh.close()
+                    log_view.write("[SUCCESS] Disconnected from remote host.")
+                except Exception as e:
+                    log_view.write(f"[ERROR] Error during disconnection: {e}")
+                finally:
+                    self._current_ssh = None
+            else:
+                log_view.write("[INFO] Not currently connected to any remote host.")
+
 
         else:
             log_view.write(f"[ERROR] Unknown command: {cmd}")
