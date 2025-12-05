@@ -18,6 +18,7 @@ class PwnChainApp(App):
 
     _current_ssh = None # Stores the current SSH connection object
     _current_elf = None # Stores the current ELF object
+    _current_process = None # Stores the current running process
 
     def compose(self) -> ComposeResult:
         """Create child widgets for the app."""
@@ -166,6 +167,37 @@ class PwnChainApp(App):
                 log_view.write(f"[ERROR] Failed to analyze binary: {e}")
                 if self._current_ssh and local_file_path and os.path.exists(local_file_path):
                     os.remove(local_file_path) # Clean up temp file on error
+
+        elif cmd == "run":
+            if not self._current_elf:
+                log_view.write("[ERROR] No binary loaded. Use 'load /path/to/binary' first.")
+                return
+            
+            binary_path = self._current_elf.path # Use the path from the loaded ELF
+
+            try:
+                log_view.write(f"[*] Running binary: {binary_path} with args: {args}")
+                if self._current_ssh:
+                    self._current_process = self._current_ssh.process([binary_path] + args)
+                    log_view.write("[*] Remote process started. Output will be shown below (limited).")
+                else:
+                    self._current_process = process([binary_path] + args)
+                    log_view.write("[*] Local process started. Output will be shown below (limited).")
+                
+                # Read initial output from the process
+                # This is a very basic way to show output. For full interactivity,
+                # we'd need a separate thread/task or Textual's Workers.
+                # For now, just read a bit and show.
+                output = self._current_process.recv(timeout=1)
+                if output:
+                    log_view.write("[PROCESS OUTPUT START]")
+                    log_view.write(output.decode(errors='ignore'))
+                    log_view.write("[PROCESS OUTPUT END]")
+                else:
+                    log_view.write("[INFO] No immediate output from process.")
+
+            except Exception as e:
+                log_view.write(f"[ERROR] Failed to run binary: {e}")
 
         elif cmd == "upload":
             if not self._current_ssh:
