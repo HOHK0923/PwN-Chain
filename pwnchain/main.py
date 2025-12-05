@@ -167,6 +167,28 @@ class PwnChainApp(App):
                 if self._current_ssh and local_file_path and os.path.exists(local_file_path):
                     os.remove(local_file_path) # Clean up temp file on error
 
+        elif cmd == "upload":
+            if not self._current_ssh:
+                log_view.write("[ERROR] Not connected to any remote host. Use 'connect user@host[:port]' first.")
+                return
+            if len(args) != 2:
+                log_view.write("[ERROR] Usage: upload <local_path> <remote_path>")
+                return
+            
+            local_path = args[0]
+            remote_path = args[1]
+
+            if not os.path.exists(local_path):
+                log_view.write(f"[ERROR] Local path not found: {local_path}")
+                return
+            
+            try:
+                log_view.write(f"[*] Uploading '{local_path}' to remote '{remote_path}'...")
+                self._current_ssh.upload(local_path, remote_path)
+                log_view.write(f"[SUCCESS] Uploaded '{local_path}' to '{remote_path}' on remote host.")
+            except Exception as e:
+                log_view.write(f"[ERROR] Failed to upload: {e}")
+
         elif cmd == "disconnect":
             if self._current_ssh:
                 try:
