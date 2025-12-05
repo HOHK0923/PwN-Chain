@@ -4,8 +4,9 @@ version = "0.1.0"
 description = "A TUI-based binary analysis tool for CTFs and wargames."
 authors = [{ name = "Gemini CLI", email = "gemini@google.com" }]
 dependencies = [
-    "textual",
     "pwntools",
+    "r2pipe",
+    "rich",
 ]
 
 [project.scripts]

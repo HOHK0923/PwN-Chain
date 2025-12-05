@@ -1,2 +1,3 @@
 textual
 pwntools
+r2pipe

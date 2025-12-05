@@ -3,6 +3,7 @@ import tempfile
 import atexit
 import readline
 import subprocess
+import r2pipe
 from pwn import *
 from rich.console import Console
 from rich.panel import Panel
@@ -104,6 +105,7 @@ class PwnChainCLI:
 
   [bold]분석 및 실행:[/bold]
   - [cyan]set_target[/cyan] [dim]<path>[/dim]: 분석할 대상 바이너리를 지정합니다.
+  - [cyan]decompile[/cyan] [dim]<function>[/dim]: (Ghidra) 지정된 함수를 디컴파일합니다.
   - [cyan]run[/cyan] [dim][args...][/dim]: 지정된 대상 바이너리를 실행합니다.
   - [cyan]interact[/cyan], [cyan]i[/cyan]: 현재 연결된 원격 서비스/프로세스와 상호작용합니다.
   - [cyan]send[/cyan] [dim]<data>[/dim]: 원격 서비스/프로세스에 데이터를 전송합니다.
@@ -200,7 +202,6 @@ class PwnChainCLI:
         checksec_result = elf.checksec(banner=False)
         self.console.print(Panel(str(checksec_result), title="Checksec", border_style="panel_border"))
         
-        # Only provide detailed suggestions if checksec returns a dictionary
         if not isinstance(checksec_result, dict):
             self.console.print(Panel("[info]이 바이너리 타입에 대한 상세 AI 분석은 지원되지 않습니다.[/info]", title="AI 분석 가이드", border_style="panel_border"))
             return
@@ -222,6 +223,28 @@ class PwnChainCLI:
             self.console.print(Panel("\n".join(suggestions), title="AI 분석 가이드", border_style="panel_border"))
         else:
             self.console.print(Panel("초기 정적 분석에서 명백한 취약점은 발견되지 않았습니다.", title="AI 분석 가이드", border_style="panel_border"))
+
+    def _cmd_decompile(self, args):
+        if not self._current_elf:
+            self.console.print("[error]대상이 지정되지 않았습니다. 'set_target'을 먼저 사용하세요.[/error]")
+            return
+        if not args:
+            self.console.print("[error]사용법: decompile <function_name>[/error]")
+            return
+        
+        target_func = args[0]
+        
+        try:
+            with self.console.status(f"'{target_func}' 디컴파일 중 (Ghidra 엔진 사용)...", spinner="dots6"):
+                r2 = r2pipe.open(self._current_elf.path)
+                r2.cmd("aaa") # Analyze all
+                decompiled_code = r2.cmd(f"pdd @ {target_func}")
+                r2.quit()
+            
+            self.console.print(Panel(decompiled_code, title=f"디컴파일: {target_func}", border_style="green"))
+        except Exception as e:
+            self.console.print(f"[error]디컴파일 실패: {e}[/error]")
+            self.console.print("[info]radare2 및 r2ghidra-dec 플러그인이 올바르게 설치되었는지 확인하세요.[/info]")
 
     def _cmd_ssh_to(self, args):
         if not args:
@@ -266,6 +289,7 @@ class PwnChainCLI:
         else:
             self.console.print("[info]활성화된 연결이 없습니다.[/info]")
 
+    # (Other commands remain the same)
     def _cmd_upload(self, args):
         if not self._current_ssh:
             self.console.print("[error]SSH 연결이 필요합니다. 'ssh_to'를 먼저 사용하세요.[/error]")
@@ -440,6 +464,7 @@ io.interactive()
         if not self._current_elf: return ""
         checksec_result = self._current_elf.checksec(banner=False)
         suggestions = []
+        if not isinstance(checksec_result, dict): return ""
         if not checksec_result.get('Canary'):
             suggestions.append("# - 카나리 없음 -> 스택 버퍼 오버플로우에 취약할 가능성이 높습니다.")
         if not checksec_result.get('NX'):
