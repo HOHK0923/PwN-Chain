@@ -2,6 +2,7 @@ import os
 import tempfile
 import atexit
 import readline
+import subprocess
 from pwn import *
 from rich.console import Console
 from rich.panel import Panel
@@ -43,6 +44,8 @@ class PwnChainCLI:
         self._current_elf = None
         self._current_process = None
         self._current_gdb = None
+        self._cwd_local = os.getcwd()
+        self._cwd_remote = None
         self.console = Console(theme=custom_theme)
         context.log_level = 'error'
 
@@ -73,7 +76,7 @@ class PwnChainCLI:
     def handle_command(self, command_str):
         parts = command_str.split()
         if not parts: return
-        cmd = parts[0]
+        cmd = parts[0].replace('-', '_') # allow 'set-target'
         args = parts[1:]
         
         handler = getattr(self, f"_cmd_{cmd}", self._cmd_unknown)
@@ -87,44 +90,107 @@ class PwnChainCLI:
 [bold]사용 가능한 명령어:[/bold]
   - [cyan]help[/cyan]: 이 도움말 메시지를 표시합니다.
   - [cyan]exit[/cyan]: 애플리케이션을 종료합니다.
-  - [cyan]connect[/cyan] [dim]<host> <port>[/dim]: 원격 서비스(TCP)에 연결합니다. (예: nc)
+  
+  [bold]파일 시스템:[/bold]
+  - [cyan]ls[/cyan] [dim][path][/dim]: 현재 디렉토리의 파일/폴더 목록을 봅니다.
+  - [cyan]cd[/cyan] [dim]<path>[/dim]: 작업 디렉토리를 변경합니다.
+  - [cyan]pwd[/cyan]: 현재 작업 디렉토리를 표시합니다.
+
+  [bold]연결:[/bold]
+  - [cyan]connect[/cyan] [dim]<host> <port>[/dim]: 원격 서비스(TCP)에 연결합니다.
   - [cyan]ssh_to[/cyan] [dim]<user@host[:port]>[/dim]: SSH를 통해 원격 호스트에 연결합니다.
   - [cyan]disconnect[/cyan]: 현재 연결(TCP 또는 SSH)을 끊습니다.
-  - [cyan]interact[/cyan], [cyan]i[/cyan]: 현재 연결된 원격 서비스와 상호작용합니다.
-  - [cyan]send[/cyan] [dim]<data>[/dim]: 원격 서비스에 데이터를 전송합니다.
   - [cyan]upload[/cyan] [dim]<local> <remote>[/dim]: (SSH 연결 시) 원격 호스트로 파일/폴더를 업로드합니다.
-  - [cyan]load[/cyan] [dim]<path>[/dim]: 분석할 바이너리(로컬 또는 원격)를 로드합니다.
-  - [cyan]run[/cyan] [dim][args...][/dim]: 로드된 바이너리를 실행합니다.
+
+  [bold]분석 및 실행:[/bold]
+  - [cyan]set_target[/cyan] [dim]<path>[/dim]: 분석할 대상 바이너리를 지정합니다.
+  - [cyan]run[/cyan] [dim][args...][/dim]: 지정된 대상 바이너리를 실행합니다.
+  - [cyan]interact[/cyan], [cyan]i[/cyan]: 현재 연결된 원격 서비스/프로세스와 상호작용합니다.
+  - [cyan]send[/cyan] [dim]<data>[/dim]: 원격 서비스/프로세스에 데이터를 전송합니다.
+
+  [bold]디버깅 (GDB):[/bold]
   - [cyan]gdb[/cyan]: 실행 중인 프로세스에 GDB를 연결합니다.
   - [cyan]gdb_cmd[/cyan] [dim]<gdb_command>[/dim]: GDB 명령어를 직접 실행합니다.
   - [cyan]c, n, s, b[/cyan]: GDB 실행을 제어합니다.
-  - [cyan]exploit[/cyan] [dim][filename][/dim]: pwntools 익스플로잇 템플릿을 생성합니다.
+
+  [bold]익스플로잇:[/bold]
+  - [cyan]exploit[/cyan] [dim][filename][/dim]: 익스플로잇 템플릿을 생성합니다.
 """
         self.console.print(Panel(help_text, title="도움말", border_style="panel_border"))
 
-    def _cmd_load(self, args):
-        if not args:
-            self.console.print("[error]사용법: load <file_path>[/error]")
-            return
-        
-        remote_file_path = args[0]
+    def _get_full_path(self, path):
+        # Check for absolute paths first
+        if path.startswith('/') or (len(path) > 1 and path[1] == ':'): # Handles / and C: style paths
+            return path
+
+        if self._current_ssh:
+            return os.path.join(self._cwd_remote, path)
+        else:
+            return os.path.join(self._cwd_local, path)
+
+    def _cmd_ls(self, args):
+        path = args[0] if args else "."
+        full_path = self._get_full_path(path)
         
         try:
             if self._current_ssh:
-                with self.console.status(f"원격 파일 다운로드 중: {remote_file_path}...", spinner="dots"):
+                output = self._current_ssh.execute(f"ls -laF {sh_string(full_path)}").decode()
+            else:
+                output = subprocess.check_output(["ls", "-laF", full_path], text=True)
+            self.console.print(output)
+        except Exception as e:
+            self.console.print(f"[error]목록 조회 실패: {e}[/error]")
+
+    def _cmd_cd(self, args):
+        if not args:
+            self.console.print("[error]이동할 경로를 지정해주세요.[/error]")
+            return
+        path = " ".join(args)
+        
+        try:
+            if self._current_ssh:
+                # Execute 'cd' and then 'pwd' to get the new absolute path
+                new_path_bytes = self._current_ssh.execute(f"cd {sh_string(self._get_full_path(path))} && pwd")
+                new_path = new_path_bytes.decode().strip()
+                self._cwd_remote = new_path
+                self.console.print(f"[info]원격 작업 디렉토리 변경: [path]{self._cwd_remote}[/path][/info]")
+            else:
+                os.chdir(self._get_full_path(path))
+                self._cwd_local = os.getcwd()
+                self.console.print(f"[info]로컬 작업 디렉토리 변경: [path]{self._cwd_local}[/path][/info]")
+        except Exception as e:
+            self.console.print(f"[error]디렉토리 변경 실패: {e}[/error]")
+
+    def _cmd_pwd(self, args):
+        if self._current_ssh:
+            self.console.print(f"[path]{self._cwd_remote}[/path]")
+        else:
+            self.console.print(f"[path]{self._cwd_local}[/path]")
+
+    def _cmd_set_target(self, args):
+        if not args:
+            self.console.print("[error]사용법: set_target <file_path>[/error]")
+            return
+        
+        target_path = self._get_full_path(args[0])
+        
+        try:
+            if self._current_ssh:
+                with self.console.status(f"원격 파일 다운로드 중: {target_path}...", spinner="dots"):
                     with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
-                        self._current_ssh.download(remote_file_path, tmp_file.name)
+                        self._current_ssh.download(target_path, tmp_file.name)
                         local_file_path = tmp_file.name
                 atexit.register(os.remove, local_file_path)
                 self.console.print(f"[success]임시 파일로 다운로드 완료: [path]{local_file_path}[/path][/success]")
             else:
-                local_file_path = remote_file_path
+                local_file_path = target_path
                 if not os.path.exists(local_file_path):
                     self.console.print(f"[error]로컬 파일을 찾을 수 없습니다: [path]{local_file_path}[/path][/error]")
                     return
 
             self._current_elf = elf = ELF(local_file_path)
-            self.console.print(f"[*] 바이너리 로드 완료: [path]{remote_file_path}[/path]")
+            self._current_elf.path = target_path # Store the original path for context
+            self.console.print(f"[*] 대상 바이너리 지정 완료: [path]{target_path}[/path]")
             self._run_ai_analysis(elf)
 
         except Exception as e:
@@ -150,7 +216,7 @@ class PwnChainCLI:
         if suggestions:
             self.console.print(Panel("\n".join(suggestions), title="AI 분석 가이드", border_style="panel_border"))
         else:
-            self.console.print(Panel("초기 정적 분석에서 명백한 취약점은 발견되지 않았습니다. 로직 상의 허점이나 다른 종류의 취약점을 찾아보세요.", title="AI 분석 가이드", border_style="panel_border"))
+            self.console.print(Panel("초기 정적 분석에서 명백한 취약점은 발견되지 않았습니다.", title="AI 분석 가이드", border_style="panel_border"))
 
     def _cmd_ssh_to(self, args):
         if not args:
@@ -161,6 +227,7 @@ class PwnChainCLI:
             user, host, port = self._parse_ssh_string(args[0])
             with self.console.status(f"{user}@{host}:{port}에 연결하는 중...", spinner="earth"):
                 self._current_ssh = ssh(host=host, user=user, port=port)
+                self._cwd_remote = self._current_ssh.pwd.decode().strip()
             self.console.print(f"[success][bold]{user}@{host}:{port}[/bold]에 연결되었습니다![/success]")
         except Exception as e:
             self.console.print(f"[error]SSH 연결 실패: {e}[/error]")
@@ -169,10 +236,11 @@ class PwnChainCLI:
         if len(args) != 2:
             self.console.print("[error]사용법: connect <host> <port>[/error]")
             return
-        host, port = args
+        host, port_str = args
         try:
+            port = int(port_str)
             with self.console.status(f"{host}:{port}에 연결하는 중...", spinner="earth"):
-                self._current_io = remote(host, int(port))
+                self._current_io = remote(host, port)
             self.console.print(f"[success][bold]{host}:{port}[/bold]에 연결되었습니다! 'interact' 명령어로 상호작용하세요.[/success]")
         except Exception as e:
             self.console.print(f"[error]TCP 연결 실패: {e}[/error]")
@@ -201,7 +269,7 @@ class PwnChainCLI:
             self.console.print("[error]사용법: upload <local_path> <remote_path>[/error]")
             return
         
-        local_path, remote_path = args
+        local_path, remote_path = self._get_full_path(args[0]), self._get_full_path(args[1])
         if not os.path.exists(local_path):
             self.console.print(f"[error]로컬 경로를 찾을 수 없습니다: [path]{local_path}[/path][/error]")
             return
@@ -218,12 +286,13 @@ class PwnChainCLI:
             self.console.print("[warning]이미 원격 서비스에 연결되어 있습니다. 'run' 대신 'interact' 또는 'send'를 사용하세요.[/warning]")
             return
         if not self._current_elf:
-            self.console.print("[error]로드된 바이너리가 없습니다.[/error]")
+            self.console.print("[error]대상이 지정되지 않았습니다. 'set_target'을 먼저 사용하세요.[/error]")
             return
         
         try:
             self.console.print(f"[*] 프로세스 시작: [path]{self._current_elf.path}[/path] {' '.join(args)}")
             if self._current_ssh:
+                # Use the original remote path for execution
                 self._current_process = self._current_ssh.process([self._current_elf.path] + args)
             else:
                 self._current_process = process([self._current_elf.path] + args)
@@ -270,7 +339,7 @@ class PwnChainCLI:
         if not args:
             self.console.print("[error]사용법: break <address/function_name>[/error]")
             return
-        self._execute_gdb_cmd(lambda: self._current_gdb.break_(args[0]))
+        self._execute_gdb_cmd(lambda: self._current_gdb.break_(" ".join(args)))
     def _cmd_break(self, args): self._cmd_b(args)
 
     def _cmd_gdb_cmd(self, args):
@@ -306,7 +375,7 @@ class PwnChainCLI:
 
     def _cmd_exploit(self, args):
         if not self._current_elf:
-            self.console.print("[error]로드된 바이너리가 없습니다.[/error]")
+            self.console.print("[error]대상이 지정되지 않았습니다. 'set_target'을 먼저 사용하세요.[/error]")
             return
         
         exploit_file_name = args[0] if args else "exploit.py"
@@ -318,23 +387,23 @@ class PwnChainCLI:
             connect_port = self._current_io.port
         elif self._current_ssh:
             connect_host = self._current_ssh.host
-            connect_port = self._current_ssh.port # This might be SSH port, user should check
+            # Defaulting to a common pwn port, not the SSH port
+            connect_port = 1337 
         
-        template = f"""#!/usr/bin/env python3
+        template = f"#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 from pwn import *
 
 # --- Gemini가 생성한 익스플로잇: {self._current_elf.path} ---
 exe = context.binary = ELF('{self._current_elf.path}')
 context.arch = '{self._current_elf.arch}'
-# context.log_level = 'debug' # 디버그 로그 활성화
+# context.log_level = 'debug'
 
 # --- 연결 정보 ---
 HOST = '{connect_host}'
 PORT = {connect_port}
 
 def start(argv=[], *a, **kw):
-    '''타겟 프로세스 시작'''
     if args.REMOTE:
         return connect(HOST, PORT)
     if args.GDB:
@@ -342,7 +411,6 @@ def start(argv=[], *a, **kw):
     else:
         return process([exe.path] + argv, *a, **kw)
 
-# --- GDB 스크립트 ---
 gdbscript = '''
 b main
 continue
@@ -353,9 +421,8 @@ continue
 
 # --- 익스플로잇 로직 (수정 필요) ---
 io = start()
-# 예: io.sendlineafter(b'> ', b'payload')
-io.interactive()"
-"""
+io.interactive()
+"
         try:
             with open(exploit_file_name, "w") as f:
                 f.write(template)
@@ -364,8 +431,8 @@ io.interactive()"
             self.console.print(f"[error]익스플로잇 파일 생성 실패: {e}[/error]")
 
     def _get_ai_suggestions_for_exploit(self):
+        # (This helper method remains the same)
         if not self._current_elf: return ""
-        
         checksec_result = self._current_elf.checksec(banner=False)
         suggestions = []
         if not checksec_result.get('Canary'):
@@ -374,13 +441,12 @@ io.interactive()"
             suggestions.append("# - NX 비활성화 -> 셸코드 주입이 가능한 공격 벡터입니다.")
         if not checksec_result.get('PIE'):
             suggestions.append("# - PIE 비활성화 -> 고정 주소를 사용하므로 ROP/ret2libc 공격이 용이합니다.")
-        
         dangerous_functions = ['gets', 'strcpy', 'sprintf', 'system']
         found = [func for func in dangerous_functions if func in self._current_elf.symbols or func in self._current_elf.plt]
         if found:
             suggestions.append(f"# - 위험 함수 발견: {', '.join(found)}.")
-        
         return "\n".join(suggestions)
+
 
     def _parse_ssh_string(self, connect_str):
         user_host, *port_part = connect_str.split(':')
@@ -393,10 +459,12 @@ io.interactive()"
         self.console.print("PwnChain CLI에 오신 것을 환영합니다! 'help'를 입력하여 명령어 목록을 확인하세요.")
         while True:
             try:
-                command = input("pwnchain> ").strip()
+                current_path = self._cwd_remote if self._current_ssh else self._cwd_local
+                prompt_text = Text(f"({current_path}) ", style="prompt") + Text("pwnchain> ")
+                command = self.console.input(prompt_text)
                 if not command: continue
-                if command == "exit": break
-                self.handle_command(command)
+                if command.strip() == "exit": break
+                self.handle_command(command.strip())
             except KeyboardInterrupt:
                 self.console.print("\n('exit'를 입력하여 종료하세요)")
             except EOFError:
