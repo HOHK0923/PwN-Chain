@@ -200,6 +200,11 @@ class PwnChainCLI:
         checksec_result = elf.checksec(banner=False)
         self.console.print(Panel(str(checksec_result), title="Checksec", border_style="panel_border"))
         
+        # Only provide detailed suggestions if checksec returns a dictionary
+        if not isinstance(checksec_result, dict):
+            self.console.print(Panel("[info]이 바이너리 타입에 대한 상세 AI 분석은 지원되지 않습니다.[/info]", title="AI 분석 가이드", border_style="panel_border"))
+            return
+
         suggestions = []
         if not checksec_result.get('Canary'):
             suggestions.append("- [warning]카나리(Canary) 없음:[/warning] 스택 버퍼 오버플로우에 취약할 수 있습니다.")
