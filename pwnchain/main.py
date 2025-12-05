@@ -39,6 +39,7 @@ class PwnChainCLI:
 
     def __init__(self):
         self._current_ssh = None
+        self._current_io = None
         self._current_elf = None
         self._current_process = None
         self._current_gdb = None
@@ -86,17 +87,17 @@ class PwnChainCLI:
 [bold]사용 가능한 명령어:[/bold]
   - [cyan]help[/cyan]: 이 도움말 메시지를 표시합니다.
   - [cyan]exit[/cyan]: 애플리케이션을 종료합니다.
-  - [cyan]connect[/cyan] [dim]<user@host[:port]>[/dim]: SSH를 통해 원격 호스트에 연결합니다.
-  - [cyan]disconnect[/cyan]: 원격 호스트와의 연결을 끊습니다.
-  - [cyan]upload[/cyan] [dim]<local> <remote>[/dim]: 원격 호스트로 파일 또는 폴더를 업로드합니다.
+  - [cyan]connect[/cyan] [dim]<host> <port>[/dim]: 원격 서비스(TCP)에 연결합니다. (예: nc)
+  - [cyan]ssh_to[/cyan] [dim]<user@host[:port]>[/dim]: SSH를 통해 원격 호스트에 연결합니다.
+  - [cyan]disconnect[/cyan]: 현재 연결(TCP 또는 SSH)을 끊습니다.
+  - [cyan]interact[/cyan], [cyan]i[/cyan]: 현재 연결된 원격 서비스와 상호작용합니다.
+  - [cyan]send[/cyan] [dim]<data>[/dim]: 원격 서비스에 데이터를 전송합니다.
+  - [cyan]upload[/cyan] [dim]<local> <remote>[/dim]: (SSH 연결 시) 원격 호스트로 파일/폴더를 업로드합니다.
   - [cyan]load[/cyan] [dim]<path>[/dim]: 분석할 바이너리(로컬 또는 원격)를 로드합니다.
   - [cyan]run[/cyan] [dim][args...][/dim]: 로드된 바이너리를 실행합니다.
   - [cyan]gdb[/cyan]: 실행 중인 프로세스에 GDB를 연결합니다.
   - [cyan]gdb_cmd[/cyan] [dim]<gdb_command>[/dim]: GDB 명령어를 직접 실행합니다.
-  - [cyan]c, cont, continue[/cyan]: GDB에서 실행을 계속합니다.
-  - [cyan]n, next[/cyan]: GDB에서 다음 명령어로 스텝 오버합니다.
-  - [cyan]s, si, step, stepi[/cyan]: GDB에서 다음 명령어로 스텝 인합니다.
-  - [cyan]b, break[/cyan] [dim]<target>[/dim]: GDB에 중단점을 설정합니다.
+  - [cyan]c, n, s, b[/cyan]: GDB 실행을 제어합니다.
   - [cyan]exploit[/cyan] [dim][filename][/dim]: pwntools 익스플로잇 템플릿을 생성합니다.
 """
         self.console.print(Panel(help_text, title="도움말", border_style="panel_border"))
@@ -151,9 +152,9 @@ class PwnChainCLI:
         else:
             self.console.print(Panel("초기 정적 분석에서 명백한 취약점은 발견되지 않았습니다. 로직 상의 허점이나 다른 종류의 취약점을 찾아보세요.", title="AI 분석 가이드", border_style="panel_border"))
 
-    def _cmd_connect(self, args):
+    def _cmd_ssh_to(self, args):
         if not args:
-            self.console.print("[error]사용법: connect <user@host[:port]>[/error]")
+            self.console.print("[error]사용법: ssh_to <user@host[:port]>[/error]")
             return
         
         try:
@@ -162,19 +163,39 @@ class PwnChainCLI:
                 self._current_ssh = ssh(host=host, user=user, port=port)
             self.console.print(f"[success][bold]{user}@{host}:{port}[/bold]에 연결되었습니다![/success]")
         except Exception as e:
-            self.console.print(f"[error]연결 실패: {e}[/error]")
+            self.console.print(f"[error]SSH 연결 실패: {e}[/error]")
 
+    def _cmd_connect(self, args):
+        if len(args) != 2:
+            self.console.print("[error]사용법: connect <host> <port>[/error]")
+            return
+        host, port = args
+        try:
+            with self.console.status(f"{host}:{port}에 연결하는 중...", spinner="earth"):
+                self._current_io = remote(host, int(port))
+            self.console.print(f"[success][bold]{host}:{port}[/bold]에 연결되었습니다! 'interact' 명령어로 상호작용하세요.[/success]")
+        except Exception as e:
+            self.console.print(f"[error]TCP 연결 실패: {e}[/error]")
+    
     def _cmd_disconnect(self, args):
+        disconnected = False
         if self._current_ssh:
             self._current_ssh.close()
             self._current_ssh = None
+            disconnected = True
+        if self._current_io:
+            self._current_io.close()
+            self._current_io = None
+            disconnected = True
+        
+        if disconnected:
             self.console.print("[success]연결이 종료되었습니다.[/success]")
         else:
-            self.console.print("[info]연결된 호스트가 없습니다.[/info]")
+            self.console.print("[info]활성화된 연결이 없습니다.[/info]")
 
     def _cmd_upload(self, args):
         if not self._current_ssh:
-            self.console.print("[error]연결된 호스트가 없습니다. 'connect'를 먼저 사용하세요.[/error]")
+            self.console.print("[error]SSH 연결이 필요합니다. 'ssh_to'를 먼저 사용하세요.[/error]")
             return
         if len(args) != 2:
             self.console.print("[error]사용법: upload <local_path> <remote_path>[/error]")
@@ -193,6 +214,9 @@ class PwnChainCLI:
             self.console.print(f"[error]업로드 실패: {e}[/error]")
 
     def _cmd_run(self, args):
+        if self._current_io:
+            self.console.print("[warning]이미 원격 서비스에 연결되어 있습니다. 'run' 대신 'interact' 또는 'send'를 사용하세요.[/warning]")
+            return
         if not self._current_elf:
             self.console.print("[error]로드된 바이너리가 없습니다.[/error]")
             return
@@ -259,15 +283,43 @@ class PwnChainCLI:
         except Exception as e:
             self.console.print(f"[error]GDB 명령어 실패: {e}[/error]")
 
+    def _cmd_interact(self, args):
+        target = self._current_io or self._current_process
+        if not target:
+            self.console.print("[error]상호작용할 연결 또는 프로세스가 없습니다.[/error]")
+            return
+        self.console.print(f"[info]'{target}'와 상호작용을 시작합니다... (Ctrl+C 후 Enter 또는 Ctrl+D로 종료)[/info]")
+        target.interactive()
+    def _cmd_i(self, args): self._cmd_interact(args)
+
+    def _cmd_send(self, args):
+        target = self._current_io or self._current_process
+        if not target:
+            self.console.print("[error]데이터를 보낼 연결 또는 프로세스가 없습니다.[/error]")
+            return
+        data_to_send = " ".join(args)
+        try:
+            target.sendline(data_to_send.encode())
+            self.console.print(f"[info]전송 완료: {data_to_send!r}[/info]")
+        except Exception as e:
+            self.console.print(f"[error]전송 실패: {e}[/error]")
+
     def _cmd_exploit(self, args):
         if not self._current_elf:
             self.console.print("[error]로드된 바이너리가 없습니다.[/error]")
             return
         
         exploit_file_name = args[0] if args else "exploit.py"
-        connect_host = self._current_ssh.host if self._current_ssh else "127.0.0.1"
-        connect_port = self._current_ssh.port if self._current_ssh else 1337
-
+        
+        connect_host = "127.0.0.1"
+        connect_port = 1337
+        if self._current_io:
+            connect_host = self._current_io.host
+            connect_port = self._current_io.port
+        elif self._current_ssh:
+            connect_host = self._current_ssh.host
+            connect_port = self._current_ssh.port # This might be SSH port, user should check
+        
         template = f"""#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 from pwn import *
@@ -301,19 +353,9 @@ continue
 
 # --- 익스플로잇 로직 (수정 필요) ---
 io = start()
-
-# 예시: 버퍼 오버플로우 (카나리가 없는 경우)
-# from pwnlib.util.cyclic import cyclic, cyclic_find
-# offset = cyclic_find(b'...') # GDB에서 `cyclic 200`, `run`, `p $rsp` 등으로 오프셋 찾기
-# payload = flat(
-#     b'A' * offset,
-#     p64(0xdeadbeef) # 반환 주소 (예: exe.sym.win_function)
-# )
-
-# 페이로드 전송
-# io.sendline(payload)
-
-io.interactive()"""
+# 예: io.sendlineafter(b'> ', b'payload')
+io.interactive()"
+"""
         try:
             with open(exploit_file_name, "w") as f:
                 f.write(template)
