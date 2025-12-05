@@ -319,7 +319,93 @@ class PwnChainApp(App):
                     self._current_ssh = None
             else:
                 log_view.write("[INFO] Not currently connected to any remote host.")
+        
+        elif cmd == "exploit":
+            if not self._current_elf:
+                log_view.write("[ERROR] No binary loaded. Use 'load /path/to/binary' first to get context.")
+                return
 
+            exploit_file_name = args[0] if args else "exploit.py"
+
+            # Dynamically determine connection info
+            connect_host = self._current_ssh.host if self._current_ssh else "127.0.0.1"
+            connect_port = self._current_ssh.port if self._current_ssh else 1337 # Common default
+
+            template = f"""#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+from pwn import *
+
+# --- Setup ---
+exe = context.binary = ELF('{self._current_elf.path}')
+# Set context for architecture and OS (e.g., amd64, i386, arm, linux)
+context.arch = '{self._current_elf.arch}'
+# context.os = 'linux' # Uncomment if specific OS needed
+# context.log_level = 'debug' # 'debug', 'info', 'warn', 'error'
+
+# --- Connection ---
+HOST = '{connect_host}'
+PORT = {connect_port}
+
+def start_local(argv=[], *a, **kw):
+    '''Execute the target binary locally'''
+    if args.GDB:
+        return gdb.debug([exe.path] + argv, gdbscript=gdbscript, *a, **kw)
+    else:
+        return process([exe.path] + argv, *a, **kw)
+
+def start_remote(argv=[], *a, **kw):
+    '''Connect to the target binary remotely'''
+    io = connect(HOST, PORT)
+    return io
+
+def start(argv=[], *a, **kw):
+    '''Start the target process (local or remote)'''
+    if args.REMOTE:
+        return start_remote(argv, *a, **kw)
+    else:
+        return start_local(argv, *a, **kw)
+
+# --- GDB Script (optional) ---
+gdbscript = '''
+b main
+continue
+'''.format(**locals())
+
+# --- Exploit Logic (EDIT ME!) ---
+io = start()
+
+# Example: Buffer Overflow (replace with actual offset)
+# offset = 0xXX # Replace with actual offset to return address
+# payload = b'A' * offset
+# payload += p64(exe.sym.win_function) # Example: return to a 'win' function, or a ROP chain
+
+# Example: Ret2libc (requires libc base address leak)
+# libc = ELF('/lib/x86_64-linux-gnu/libc.so.6') # Adjust libc path for remote, or use local
+# pop_rdi = # gadget address
+# ret = # gadget address (for stack alignment, if needed)
+# payload = b'A' * offset
+# payload += p64(pop_rdi)
+# payload += p64(libc.sym.str_bin_sh) # Address of "/bin/sh" string in libc
+# payload += p64(ret) # for stack alignment
+# payload += p64(libc.sym.system) # Address of system() in libc
+
+# Send the payload
+# io.sendline(payload) # Use send() or sendline() based on interaction type
+
+# --- Interact ---
+io.interactive()
+
+"""
+            
+            try:
+                with open(exploit_file_name, "w") as f:
+                    f.write(template)
+
+                log_view.write(f"[SUCCESS] Generated exploit template: {exploit_file_name}")
+                log_view.write(f"[*] Remember to update 'HOST', 'PORT', and fill in your exploit logic. ")
+                log_view.write(f"[*] Run with: python3 {exploit_file_name} REMOTE (for remote) or python3 {exploit_file_name} GDB (for local with gdb)")
+            except Exception as e:
+                log_view.write(f"[ERROR] Failed to generate exploit file: {e}")
 
         else:
             log_view.write(f"[ERROR] Unknown command: {cmd}")
