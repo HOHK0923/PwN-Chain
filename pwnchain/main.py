@@ -65,7 +65,7 @@ class PwnChainCLI:
             stack_text = Text.from_ansi(self._current_gdb.execute("x/16xg $rsp", to_string=True))
             stack_panel = Panel(stack_text, title="Stack", border_style="yellow", expand=True)
 
-            self.console.print(Panel(Columns([disasm_panel, stack_panel, regs_table]), border_style="panel_border", title="GDB Context")
+            self.console.print(Panel(Columns([disasm_panel, stack_panel, regs_table]), border_style="panel_border", title="GDB Context"))
         except Exception as e:
             self.console.print(f"[error]Error updating context: {e}[/error]")
 
