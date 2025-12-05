@@ -390,7 +390,7 @@ class PwnChainCLI:
             # Defaulting to a common pwn port, not the SSH port
             connect_port = 1337 
         
-        template = f"#!/usr/bin/env python3
+        template = f"""#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 from pwn import *
 
@@ -422,7 +422,7 @@ continue
 # --- 익스플로잇 로직 (수정 필요) ---
 io = start()
 io.interactive()
-"
+"""
         try:
             with open(exploit_file_name, "w") as f:
                 f.write(template)
