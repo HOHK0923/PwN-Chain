@@ -1,6 +1,7 @@
 import os
 import tempfile
 import atexit
+import asyncio # For Textual async
 from pwn import *
 
 from textual.app import App, ComposeResult
@@ -19,6 +20,7 @@ class PwnChainApp(App):
     _current_ssh = None # Stores the current SSH connection object
     _current_elf = None # Stores the current ELF object
     _current_process = None # Stores the current running process
+    _current_gdb = None # Stores the current GDB process (if attached)
 
     def compose(self) -> ComposeResult:
         """Create child widgets for the app."""
@@ -167,6 +169,25 @@ class PwnChainApp(App):
                 log_view.write(f"[ERROR] Failed to analyze binary: {e}")
                 if self._current_ssh and local_file_path and os.path.exists(local_file_path):
                     os.remove(local_file_path) # Clean up temp file on error
+        
+        elif cmd == "gdb":
+            if not self._current_elf:
+                log_view.write("[ERROR] No binary loaded. Use 'load /path/to/binary' first.")
+                return
+            if not self._current_process:
+                log_view.write("[ERROR] No process running. Use 'run' first.")
+                return
+            
+            try:
+                log_view.write(f"[*] Attaching GDB to PID {self._current_process.pid}...")
+                self._current_gdb = gdb.attach(self._current_process.pid)
+                log_view.write("[SUCCESS] GDB attached. Views will update periodically.")
+                # Start periodic updates for registers and stack
+                self.set_interval(0.5, self._update_debugger_views)
+            except Exception as e:
+                log_view.write(f"[ERROR] Failed to attach GDB: {e}")
+                self._current_gdb = None # Ensure GDB is cleared on failure
+
 
         elif cmd == "run":
             if not self._current_elf:
@@ -242,6 +263,45 @@ class PwnChainApp(App):
     def action_toggle_dark(self) -> None:
         """An action to toggle dark mode."""
         self.dark = not self.dark
+    
+    def _update_debugger_views(self) -> None:
+        if not self._current_gdb or not self._current_process or not self._current_process.is_alive():
+            return
+
+        register_view = self.query_one("#register-view")
+        stack_view = self.query_one("#stack-view")
+
+        try:
+            # Fetch registers
+            registers = self._current_gdb.execute("info registers", to_string=True)
+            register_view.clear()
+            register_view.write("[*] Registers:")
+            register_view.write(registers)
+
+            # Fetch stack (e.g., 16 dwords from current RSP)
+            # This is simplified; proper stack view needs more logic
+            if self._current_gdb.arch.startswith('x86'): # Assuming x86/x86_64 for RSP
+                rsp_reg = 'rsp' if self._current_gdb.arch == 'amd64' else 'esp'
+                try:
+                    # Need to get current context to parse RSP
+                    gdb_context = self._current_gdb.execute("info registers", to_string=True)
+                    rsp_line = [line for line in gdb_context.splitlines() if rsp_reg in line][0]
+                    # Example: rsp            0x7fffffffdfc8    0x7fffffffdfc8
+                    rsp_val = int(rsp_line.split()[1], 16)
+
+                    stack_dump = self._current_gdb.execute(f"x/16xg 0x{rsp_val:x}", to_string=True) # 16 qwords (x/xg)
+                    stack_view.clear()
+                    stack_view.write("[*] Stack (around RSP):")
+                    stack_view.write(stack_dump)
+                except Exception as e:
+                    stack_view.write(f"[ERROR] Could not fetch stack (RSP-based): {e}")
+            else:
+                stack_view.write("[INFO] Stack view for non-x86 architectures not yet fully implemented.")
+
+        except Exception as e:
+            register_view.write(f"[ERROR] GDB update failed: {e}")
+            stack_view.write(f"[ERROR] GDB update failed: {e}")
+
 
 def main():
     app = PwnChainApp()
